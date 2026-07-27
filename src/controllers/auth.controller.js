@@ -47,7 +47,7 @@ const register = async (req, res, next) => {
       success: true,
       message: "Registered successfully",
       user: sanitizeUser(user),
-    });
+    }); 
   } catch (error) {
     next(error);
   }

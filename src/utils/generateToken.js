@@ -8,7 +8,8 @@ const generateToken = (userId) => {
 
 const setTokenCookie = (res, token) => {
   const cookieName = process.env.JWT_COOKIE_NAME || "token";
-
+  
+//for saving the cookies
   res.cookie(cookieName, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
