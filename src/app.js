@@ -23,7 +23,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Health check
+// Root route & Health check
+app.get("/", (req, res) => {
+  res.status(200).json({ success: true, message: "Social Media Platform API is running" });
+});
+
 app.get("/api/health", (req, res) => {
   res.status(200).json({ success: true, message: "Server is healthy" });
 });
