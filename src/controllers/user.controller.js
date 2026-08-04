@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const User = require("../models/User.model");
+const { notify } = require("../utils/notify");
 
 const PUBLIC_SELECT = "username fullName bio avatar followers following createdAt";
 const LIST_SELECT = "username fullName avatar";
@@ -67,6 +68,14 @@ const toggleFollow = async (req, res, next) => {
     }
 
     const updatedTarget = await User.findById(targetId).select("followers");
+
+    if (!alreadyFollowing) {
+      await notify(req, {
+        recipientId: targetId,
+        senderId: req.user._id,
+        type: "follow",
+      });
+    }
 
     res.status(200).json({
       success: true,

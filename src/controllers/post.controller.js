@@ -2,6 +2,7 @@ const { Readable } = require("stream");
 const Post = require("../models/Post.model");
 const Comment = require("../models/Comment.model");
 const cloudinary = require("../config/cloudinary");
+const { notify } = require("../utils/notify");
 
 const AUTHOR_SELECT = "username fullName avatar";
 
@@ -169,6 +170,15 @@ const toggleLike = async (req, res, next) => {
 
     await post.save();
 
+    if (!alreadyLiked) {
+      await notify(req, {
+        recipientId: post.author,
+        senderId: req.user._id,
+        type: "like",
+        postId: post._id,
+      });
+    }
+
     res.status(200).json({
       success: true,
       liked: !alreadyLiked,
@@ -199,8 +209,16 @@ const addComment = async (req, res, next) => {
 
     await comment.populate("author", AUTHOR_SELECT);
 
+    await notify(req, {
+      recipientId: post.author,
+      senderId: req.user._id,
+      type: "comment",
+      postId: post._id,
+      commentId: comment._id,
+    });
+
     res.status(201).json({ success: true, message: "Comment added", comment });
-  } catch (error) { 
+  } catch (error) {
     next(error);
   }
 };

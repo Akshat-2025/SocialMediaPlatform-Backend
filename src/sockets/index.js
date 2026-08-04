@@ -34,6 +34,9 @@ const initSocket = (io) => {
     if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
     onlineUsers.get(userId).add(socket.id);
 
+    // Personal room so any controller can do io.to(`user:${id}`).emit(...)
+    socket.join(`user:${userId}`);
+    
     io.emit("user:online", { userId });
 
     socket.on("disconnect", () => {
