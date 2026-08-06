@@ -39,6 +39,16 @@ const initSocket = (io) => {
     
     io.emit("user:online", { userId });
 
+    // Typing indicator relay for DMs: client emits with the other user's id,
+    // we relay it straight to that user's personal room.
+    socket.on("message:typing", ({ conversationId, recipientId }) => {
+      if (!recipientId) return;
+      io.to(`user:${recipientId}`).emit("message:typing", {
+        conversationId,
+        userId,
+      });
+    });
+    
     socket.on("disconnect", () => {
       const sockets = onlineUsers.get(userId);
       if (sockets) {

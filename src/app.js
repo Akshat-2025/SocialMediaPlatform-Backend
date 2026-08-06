@@ -6,6 +6,9 @@ const cookieParser = require("cookie-parser");
 
 const authRoutes = require("./routes/auth.routes");
 const postRoutes = require("./routes/post.routes");
+const userRoutes = require("./routes/user.routes");
+const notificationRoutes = require("./routes/notification.routes");
+const messageRoutes = require("./routes/message.routes");
 const { notFound, errorHandler } = require("./middleware/error.middleware");
 
 const app = express();
@@ -35,6 +38,9 @@ app.get("/api/health", (req, res) => {
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/posts", postRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/messages", messageRoutes);
 
 // 404 + error handling (must be last)
 app.use(notFound);
