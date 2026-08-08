@@ -4,16 +4,23 @@ const {
   getFeed,
   getUserPosts,
   getPostById,
+  updatePost,
   deletePost,
   toggleLike,
   addComment,
   getComments,
+  updateComment,
   deleteComment,
 } = require("../controllers/post.controller");
 const { protect } = require("../middleware/auth.middleware");
 const validate = require("../middleware/validate.middleware");
 const upload = require("../middleware/upload.middleware");
-const { createPostSchema, createCommentSchema } = require("../validations/post.validation");
+const {
+  createPostSchema,
+  updatePostSchema,
+  createCommentSchema,
+  updateCommentSchema,
+} = require("../validations/post.validation");
 
 const router = express.Router();
 
@@ -24,12 +31,14 @@ router.post("/", upload.array("images", 4), validate(createPostSchema), createPo
 router.get("/", getFeed);
 router.get("/user/:userId", getUserPosts);
 router.get("/:id", getPostById);
+router.patch("/:id", upload.array("images", 4), validate(updatePostSchema), updatePost);
 router.delete("/:id", deletePost);
 
 router.post("/:id/like", toggleLike);
 
 router.get("/:id/comments", getComments);
 router.post("/:id/comments", validate(createCommentSchema), addComment);
+router.patch("/:postId/comments/:commentId", validate(updateCommentSchema), updateComment);
 router.delete("/:postId/comments/:commentId", deleteComment);
 
 module.exports = router;

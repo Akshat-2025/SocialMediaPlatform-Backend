@@ -17,6 +17,12 @@ const loginSchema = z.object({
 });
 
 const updateProfileSchema = z.object({
+  username: z
+    .string()
+    .min(3, "Username must be at least 3 characters")
+    .max(30)
+    .regex(/^[a-zA-Z0-9_.]+$/, "Username can only contain letters, numbers, underscores and dots")
+    .optional(),
   fullName: z.string().min(1).max(50).optional(),
   bio: z.string().max(160).optional(),
 });

@@ -123,6 +123,65 @@ const getPostById = async (req, res, next) => {
   }
 };
 
+// @route  PATCH /api/posts/:id
+// Body: { content?, removeImageIds?: string[] } + optional new `images` files (multipart)
+const updatePost = async (req, res, next) => {
+  try {
+    const post = await Post.findById(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({ success: false, message: "Post not found" });
+    }
+
+    if (post.author.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: "Not authorized to edit this post" });
+    }
+
+    if (req.body.content !== undefined) {
+      post.content = req.body.content;
+    }
+
+    // Remove specific existing images by publicId, if requested
+    let removeImageIds = req.body.removeImageIds;
+    if (removeImageIds) {
+      if (typeof removeImageIds === "string") removeImageIds = [removeImageIds];
+      await Promise.all(
+        removeImageIds.map((publicId) => cloudinary.uploader.destroy(publicId).catch(() => {}))
+      );
+      post.images = post.images.filter((img) => !removeImageIds.includes(img.publicId));
+    }
+
+    // Append any newly uploaded images
+    const files = req.files || [];
+    if (files.length > 0) {
+      const newImages = await Promise.all(
+        files.map(async (file) => {
+          const result = await uploadImageBuffer(file.buffer);
+          return { url: result.secure_url, publicId: result.public_id };
+        })
+      );
+      post.images.push(...newImages);
+    }
+
+    if (post.images.length > 4) {
+      return res.status(400).json({ success: false, message: "A post can have at most 4 images" });
+    }
+
+    if (!post.content && post.images.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Post must have content or at least one image" });
+    }
+
+    await post.save();
+    await post.populate("author", AUTHOR_SELECT);
+
+    res.status(200).json({ success: true, message: "Post updated", post });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @route  DELETE /api/posts/:id
 const deletePost = async (req, res, next) => {
   try {
@@ -249,6 +308,31 @@ const getComments = async (req, res, next) => {
   }
 };
 
+// @route  PATCH /api/posts/:postId/comments/:commentId
+const updateComment = async (req, res, next) => {
+  try {
+    const comment = await Comment.findById(req.params.commentId);
+
+    if (!comment) {
+      return res.status(404).json({ success: false, message: "Comment not found" });
+    }
+
+    if (comment.author.toString() !== req.user._id.toString()) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized to edit this comment" });
+    }
+
+    comment.content = req.body.content;
+    await comment.save();
+    await comment.populate("author", AUTHOR_SELECT);
+
+    res.status(200).json({ success: true, message: "Comment updated", comment });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @route  DELETE /api/posts/:postId/comments/:commentId
 const deleteComment = async (req, res, next) => {
   try {
@@ -278,9 +362,11 @@ module.exports = {
   getFeed,
   getUserPosts,
   getPostById,
+  updatePost,
   deletePost,
   toggleLike,
   addComment,
   getComments,
+  updateComment,
   deleteComment,
 };
