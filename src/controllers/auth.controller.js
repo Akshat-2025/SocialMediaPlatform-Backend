@@ -59,8 +59,8 @@ const register = async (req, res, next) => {
       fullName,
     });
 
-    const token = generateToken(user._id);
-    setTokenCookie(res, token);
+    const { refreshToken } = issueAuthCookies(res, user._id);
+    await storeRefreshToken(user._id, refreshToken);
 
     res.status(201).json({
       success: true,
@@ -90,8 +90,8 @@ const login = async (req, res, next) => {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    const token = generateToken(user._id);
-    setTokenCookie(res, token);
+    const { refreshToken } = issueAuthCookies(res, user._id);
+    await storeRefreshToken(user._id, refreshToken);
 
     res.status(200).json({
       success: true,
