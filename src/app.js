@@ -12,6 +12,7 @@ const userRoutes = require("./routes/user.routes");
 const notificationRoutes = require("./routes/notification.routes");
 const messageRoutes = require("./routes/message.routes");
 const searchRoutes = require("./routes/search.routes");
+const storyRoutes = require("./routes/story.routes");
 const { apiLimiter } = require("./middleware/rateLimit.middleware");
 const { notFound, errorHandler } = require("./middleware/error.middleware");
 
@@ -49,6 +50,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/search", searchRoutes);
+app.use("/api/stories", storyRoutes);
+
 
 // 404 + error handling (must be last)
 app.use(notFound);
