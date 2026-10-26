@@ -1,7 +1,9 @@
+const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const cookie = require("cookie");
 const User = require("../models/User.model");
 const Conversation = require("../models/Conversation.model");
+const Message = require("../models/Message.model");
 
 // Map of userId -> Set of socket ids (supports multiple tabs/devices per user)
 const onlineUsers = new Map();
@@ -63,8 +65,8 @@ const initSocket = (io) => {
     io.emit("user:online", { userId });
 
     // Join a conversation room (only if user is a verified participant)
-    socket.on("conversation:join", async ({ conversationId }) => {
-      if (!conversationId) return;
+    socket.on("conversation:join", async ({ conversationId } = {}) => {
+      if (!conversationId || !mongoose.Types.ObjectId.isValid(conversationId)) return;
       try {
         const conversation = await Conversation.findOne({
           _id: conversationId,
@@ -77,9 +79,96 @@ const initSocket = (io) => {
     });
 
     // Leave a conversation room
-    socket.on("conversation:leave", ({ conversationId }) => {
+    socket.on("conversation:leave", ({ conversationId } = {}) => {
       if (conversationId) {
         socket.leave(`conv:${conversationId}`);
+      }
+    });
+
+    // Real-time message sending via socket
+    socket.on("message:send", async (data, callback) => {
+      const ack = typeof callback === "function" ? callback : () => {};
+
+      try {
+        if (!data || typeof data !== "object") {
+          return ack({ success: false, message: "Invalid payload" });
+        }
+
+        const { conversationId, content } = data;
+
+        // 1. Validate conversationId
+        if (!conversationId || !mongoose.Types.ObjectId.isValid(conversationId)) {
+          return ack({ success: false, message: "Invalid conversation id" });
+        }
+
+        // 2. Validate content
+        if (typeof content !== "string" || content.trim().length === 0) {
+          return ack({ success: false, message: "Message cannot be empty" });
+        }
+
+        const trimmedContent = content.trim();
+        if (trimmedContent.length > 2000) {
+          return ack({ success: false, message: "Message is too long" });
+        }
+
+        // 3. Find conversation and verify membership
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) {
+          return ack({ success: false, message: "Conversation not found" });
+        }
+
+        const isParticipant = conversation.participants.some(
+          (id) => id.toString() === userId
+        );
+        if (!isParticipant) {
+          return ack({
+            success: false,
+            message: "Not part of this conversation",
+          });
+        }
+
+        // 4. Persist message in MongoDB
+        const message = await Message.create({
+          conversation: conversation._id,
+          sender: userId,
+          content: trimmedContent,
+          readBy: [userId],
+        });
+
+        // 5. Update conversation metadata
+        conversation.lastMessage = message._id;
+        conversation.lastMessageAt = message.createdAt;
+        await conversation.save();
+
+        // 6. Populate sender info
+        await message.populate("sender", "username fullName avatar");
+
+        // 7. Deliver message in real time
+        const payload = {
+          conversationId: conversation._id,
+          message,
+        };
+
+        // Emit to all OTHER participants in the conversation
+        conversation.participants
+          .filter((id) => id.toString() !== userId)
+          .forEach((recipientId) => {
+            io.to(`user:${recipientId}`).emit("message:new", payload);
+          });
+
+        // Emit to sender's OTHER connected sockets (excluding current socket)
+        socket.to(`user:${userId}`).emit("message:new", payload);
+
+        // 8. Return acknowledgement to sender
+        return ack({
+          success: true,
+          message,
+        });
+      } catch (err) {
+        return ack({
+          success: false,
+          message: "Failed to send message",
+        });
       }
     });
 

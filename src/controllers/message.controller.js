@@ -66,7 +66,14 @@ const getConversations = async (req, res, next) => {
 
 // Shared guard: confirms req.user is a participant, 404s/403s otherwise
 const loadOwnedConversation = async (req, res) => {
-  const conversation = await Conversation.findById(req.params.conversationId);
+  const { conversationId } = req.params;
+
+  if (!conversationId || !mongoose.Types.ObjectId.isValid(conversationId)) {
+    res.status(400).json({ success: false, message: "Invalid conversation id" });
+    return null;
+  }
+
+  const conversation = await Conversation.findById(conversationId);
 
   if (!conversation) {
     res.status(404).json({ success: false, message: "Conversation not found" });
@@ -91,13 +98,13 @@ const getMessages = async (req, res, next) => {
     const conversation = await loadOwnedConversation(req, res);
     if (!conversation) return;
 
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(parseInt(req.query.limit) || 30, 50);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 30, 50));
     const skip = (page - 1) * limit;
 
     const [messages, total] = await Promise.all([
       Message.find({ conversation: conversation._id })
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: -1, _id: -1 })
         .skip(skip)
         .limit(limit)
         .populate("sender", PARTICIPANT_SELECT),
@@ -123,7 +130,7 @@ const sendMessage = async (req, res, next) => {
     const message = await Message.create({
       conversation: conversation._id,
       sender: req.user._id,
-      content: req.body.content,
+      content: req.body.content.trim(),
       readBy: [req.user._id],
     });
 
@@ -136,13 +143,15 @@ const sendMessage = async (req, res, next) => {
     // Push to the other participant(s) in real time
     const io = req.app.get("io");
     if (io) {
+      const payload = {
+        conversationId: conversation._id,
+        message,
+      };
+
       conversation.participants
         .filter((id) => id.toString() !== req.user._id.toString())
         .forEach((id) => {
-          io.to(`user:${id}`).emit("message:new", {
-            conversationId: conversation._id,
-            message,
-          });
+          io.to(`user:${id}`).emit("message:new", payload);
         });
     }
 

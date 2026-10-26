@@ -132,6 +132,15 @@ describe("POST /api/messages/conversations/:userId", () => {
 });
 
 describe("GET /api/messages/conversations/:conversationId/messages", () => {
+  it("returns 400 when conversationId is not a valid ObjectId", async () => {
+    const res = await request(app)
+      .get("/api/messages/conversations/not-a-valid-id/messages")
+      .set("Cookie", authCookie());
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/invalid conversation id/i);
+  });
+
   it("returns 404 when conversation not found", async () => {
     Conversation.findById.mockResolvedValue(null);
 
@@ -156,7 +165,7 @@ describe("GET /api/messages/conversations/:conversationId/messages", () => {
     expect(res.body.message).toMatch(/not part of this conversation/i);
   });
 
-  it("returns 200 with paginated messages for a participant", async () => {
+  it("returns 200 with paginated messages for a participant and handles invalid pagination params", async () => {
     Conversation.findById.mockResolvedValue({
       _id: CONV_ID,
       participants: [USER_ONE_ID, USER_TWO_ID],
@@ -174,18 +183,61 @@ describe("GET /api/messages/conversations/:conversationId/messages", () => {
     Message.find.mockReturnValue(makeQuery([fakeMessage]));
     Message.countDocuments.mockReturnValue(makeQuery(1));
 
+    // Request with invalid/negative page and limit
     const res = await request(app)
-      .get(`/api/messages/conversations/${CONV_ID}/messages?page=1&limit=30`)
+      .get(`/api/messages/conversations/${CONV_ID}/messages?page=-5&limit=1000`)
       .set("Cookie", authCookie());
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.messages.length).toBe(1);
     expect(res.body.messages[0].content).toBe("Hello there");
+    // Normalizes limit to maximum 50 and page to 1
+    expect(res.body.pagination.page).toBe(1);
+    expect(res.body.pagination.limit).toBe(50);
+  });
+
+  it("allows a previously disconnected recipient to retrieve saved message history", async () => {
+    // User Two retrieves messages in a conversation where User One sent a message
+    Conversation.findById.mockResolvedValue({
+      _id: CONV_ID,
+      participants: [USER_ONE_ID, USER_TWO_ID],
+    });
+
+    const persistedMessage = {
+      _id: MSG_ID,
+      conversation: CONV_ID,
+      sender: fakeUserOne,
+      content: "Message sent while User Two was offline",
+      readBy: [USER_ONE_ID],
+      createdAt: new Date(Date.now() - 60000),
+    };
+
+    Message.find.mockReturnValue(makeQuery([persistedMessage]));
+    Message.countDocuments.mockReturnValue(makeQuery(1));
+
+    const res = await request(app)
+      .get(`/api/messages/conversations/${CONV_ID}/messages`)
+      .set("Cookie", authCookie(USER_TWO_ID));
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.messages.length).toBe(1);
+    expect(res.body.messages[0].content).toBe("Message sent while User Two was offline");
   });
 });
 
 describe("POST /api/messages/conversations/:conversationId/messages", () => {
+  it("returns 400 when conversationId is invalid", async () => {
+    const res = await request(app)
+      .post("/api/messages/conversations/not-a-valid-id/messages")
+      .set("Cookie", authCookie())
+      .send({ content: "Valid text" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/invalid conversation id/i);
+  });
+
   it("returns 400 when content is empty", async () => {
     const res = await request(app)
       .post(`/api/messages/conversations/${CONV_ID}/messages`)
@@ -193,6 +245,38 @@ describe("POST /api/messages/conversations/:conversationId/messages", () => {
       .send({ content: "" });
 
     expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/validation failed/i);
+  });
+
+  it("returns 400 when content is whitespace only", async () => {
+    const res = await request(app)
+      .post(`/api/messages/conversations/${CONV_ID}/messages`)
+      .set("Cookie", authCookie())
+      .send({ content: "     " });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/validation failed/i);
+  });
+
+  it("returns 400 when content exceeds 2000 characters", async () => {
+    const res = await request(app)
+      .post(`/api/messages/conversations/${CONV_ID}/messages`)
+      .set("Cookie", authCookie())
+      .send({ content: "a".repeat(2001) });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/validation failed/i);
+  });
+
+  it("returns 404 when conversation not found", async () => {
+    Conversation.findById.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post(`/api/messages/conversations/${CONV_ID}/messages`)
+      .set("Cookie", authCookie())
+      .send({ content: "Hello" });
+
+    expect(res.status).toBe(404);
   });
 
   it("returns 403 when sender is not a participant", async () => {
@@ -248,6 +332,30 @@ describe("POST /api/messages/conversations/:conversationId/messages", () => {
     expect(emitMock).toHaveBeenCalledWith("message:new", expect.objectContaining({
       conversationId: CONV_ID,
     }));
+  });
+
+  it("handles database save failure without emitting socket events", async () => {
+    Conversation.findById.mockResolvedValue({
+      _id: CONV_ID,
+      participants: [USER_ONE_ID, USER_TWO_ID],
+      save: jest.fn(),
+    });
+
+    Message.create.mockRejectedValue(new Error("Database connection lost"));
+
+    const emitMock = jest.fn();
+    const ioMock = {
+      to: jest.fn().mockReturnValue({ emit: emitMock }),
+    };
+    app.set("io", ioMock);
+
+    const res = await request(app)
+      .post(`/api/messages/conversations/${CONV_ID}/messages`)
+      .set("Cookie", authCookie(USER_ONE_ID))
+      .send({ content: "This will fail in DB" });
+
+    expect(res.status).toBe(500);
+    expect(emitMock).not.toHaveBeenCalled();
   });
 });
 
