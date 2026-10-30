@@ -56,10 +56,14 @@ describe("GET /api/messages/conversations", () => {
       participants: [fakeUserOne, fakeUserTwo],
       lastMessage: null,
       lastMessageAt: new Date(),
+      // toObject() is called by the controller when building the enriched response
+      toObject() { return { _id: this._id, participants: this.participants, lastMessage: this.lastMessage, lastMessageAt: this.lastMessageAt }; },
     };
 
     Conversation.find.mockReturnValue(makeQuery([fakeConversation]));
     Conversation.countDocuments.mockReturnValue(makeQuery(1));
+    // Phase 3: getConversations now runs an aggregation for unread counts
+    Message.aggregate.mockResolvedValue([]);
 
     const res = await request(app)
       .get("/api/messages/conversations?page=1&limit=20")
@@ -73,6 +77,7 @@ describe("GET /api/messages/conversations", () => {
     expect(res.body.pagination.total).toBe(1);
   });
 });
+
 
 describe("POST /api/messages/conversations/:userId", () => {
   it("returns 400 when invalid user id provided", async () => {
@@ -374,8 +379,10 @@ describe("PATCH /api/messages/conversations/:conversationId/read", () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(Message.updateMany).toHaveBeenCalledWith(
-      { conversation: CONV_ID, readBy: { $ne: USER_ONE_ID } },
-      { $addToSet: { readBy: USER_ONE_ID } }
+      expect.objectContaining({ _id: { $in: [expect.anything()] } }),
+      expect.objectContaining({
+        $addToSet: { readBy: USER_ONE_ID, deliveredTo: USER_ONE_ID },
+      })
     );
   });
 });

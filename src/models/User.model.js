@@ -42,6 +42,10 @@ const userSchema = new mongoose.Schema(
     followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     refreshTokens: [{ type: String, select: false }],
+    // Set when the user's last socket disconnects; null while online or never connected.
+    // Stored in MongoDB so it survives server restarts.
+    // Cleared (not reset) on reconnect — presence logic handles it via the in-memory registry.
+    lastSeen: { type: Date, default: null },
   },
   { timestamps: true }
 );

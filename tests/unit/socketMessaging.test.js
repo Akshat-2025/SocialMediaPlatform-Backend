@@ -6,7 +6,7 @@ jest.mock("../../src/models/Message.model");
 
 const Conversation = require("../../src/models/Conversation.model");
 const Message = require("../../src/models/Message.model");
-const { initSocket, onlineUsers } = require("../../src/sockets/index");
+const { initSocket, onlineUsers, typingTimers } = require("../../src/sockets/index");
 
 const SENDER_ID = new mongoose.Types.ObjectId().toString();
 const RECIPIENT_ID = new mongoose.Types.ObjectId().toString();
@@ -24,6 +24,7 @@ describe("Socket Real-Time Messaging (message:send)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     onlineUsers.clear();
+    typingTimers.clear();
     eventHandlers = {};
 
     ioToEmitMock = jest.fn();
@@ -51,6 +52,10 @@ describe("Socket Real-Time Messaging (message:send)", () => {
       emit: jest.fn(),
       to: jest.fn().mockReturnValue({ emit: ioToEmitMock }),
     };
+
+    // Phase 4: connection handler calls notifyPresence() which queries Conversation.find.
+    // Return empty so no presence events fire during messaging tests.
+    Conversation.find.mockResolvedValue([]);
 
     initSocket(ioMock);
   });
@@ -168,6 +173,7 @@ describe("Socket Real-Time Messaging (message:send)", () => {
         sender: SENDER_ID,
         content: "Hello recipient!",
         readBy: [SENDER_ID],
+        deliveredTo: [SENDER_ID],
       });
 
       // 2. Conversation metadata updated and saved

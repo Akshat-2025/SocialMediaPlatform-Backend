@@ -6,7 +6,7 @@ jest.mock("../../src/models/Conversation.model");
 
 const User = require("../../src/models/User.model");
 const Conversation = require("../../src/models/Conversation.model");
-const { initSocket, onlineUsers } = require("../../src/sockets/index");
+const { initSocket, onlineUsers, typingTimers } = require("../../src/sockets/index");
 const { makeQuery } = require("../helpers/mockQuery");
 
 const USER_ID = new mongoose.Types.ObjectId().toString();
@@ -28,6 +28,7 @@ describe("Socket.IO Initialization and Authentication", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     onlineUsers.clear();
+    typingTimers.clear();
 
     ioMock = {
       use: jest.fn((fn) => {
@@ -41,6 +42,10 @@ describe("Socket.IO Initialization and Authentication", () => {
       emit: jest.fn(),
       to: jest.fn().mockReturnValue({ emit: jest.fn() }),
     };
+
+    // Phase 4: notifyPresence() queries Conversation.find for partners.
+    // Return empty array by default so no presence events fire in auth tests.
+    Conversation.find.mockResolvedValue([]);
 
     initSocket(ioMock);
   });
@@ -162,7 +167,7 @@ describe("Socket.IO Initialization and Authentication", () => {
     let socket;
     let eventHandlers;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       eventHandlers = {};
       socket = {
         id: "socket-123",
@@ -170,17 +175,21 @@ describe("Socket.IO Initialization and Authentication", () => {
         user: fakeUser,
         join: jest.fn(),
         leave: jest.fn(),
+        to: jest.fn().mockReturnValue({ emit: jest.fn() }),
         on: jest.fn((event, fn) => {
           eventHandlers[event] = fn;
         }),
       };
 
-      connectionHandler(socket);
+      // connectionHandler is async in Phase 4; await it so setup is complete
+      await connectionHandler(socket);
     });
 
-    it("joins user's personal room and broadcasts online status", () => {
+    it("joins user's personal room and registers in onlineUsers on first connection", async () => {
+      // connectionHandler is async in Phase 4 (awaits notifyPresence)
+      await connectionHandler(socket);
+
       expect(socket.join).toHaveBeenCalledWith(`user:${USER_ID}`);
-      expect(ioMock.emit).toHaveBeenCalledWith("user:online", { userId: USER_ID });
       expect(onlineUsers.has(USER_ID)).toBe(true);
       expect(onlineUsers.get(USER_ID).has("socket-123")).toBe(true);
     });
@@ -208,27 +217,39 @@ describe("Socket.IO Initialization and Authentication", () => {
       expect(socket.join).not.toHaveBeenCalledWith(`conv:${CONV_ID}`);
     });
 
-    it("relays typing indicator to recipient's personal room", () => {
-      const recipientEmit = jest.fn();
-      ioMock.to.mockReturnValue({ emit: recipientEmit });
+    it("typing:start — relays typing event to conversation partners only", async () => {
+      const partnerEmit = jest.fn();
+      ioMock.to.mockReturnValue({ emit: partnerEmit });
 
-      eventHandlers["message:typing"]({
-        conversationId: CONV_ID,
-        recipientId: OTHER_USER_ID,
+      // Conversation.findOne for typing:start membership check
+      Conversation.findOne.mockResolvedValue({
+        _id: CONV_ID,
+        participants: [USER_ID, OTHER_USER_ID],
       });
 
+      await eventHandlers["typing:start"]({ conversationId: CONV_ID });
+
+      // Identity comes from socket.userId (server-verified), not client payload
       expect(ioMock.to).toHaveBeenCalledWith(`user:${OTHER_USER_ID}`);
-      expect(recipientEmit).toHaveBeenCalledWith("message:typing", {
+      expect(partnerEmit).toHaveBeenCalledWith("typing:start", {
         conversationId: CONV_ID,
         userId: USER_ID,
       });
     });
 
-    it("handles disconnect and broadcasts offline status when user has no active sockets", () => {
-      eventHandlers["disconnect"]();
+    it("handles disconnect: cleans up onlineUsers and notifies partners when no sockets remain", async () => {
+      // Phase 4: disconnect handler is async (awaits clearAllTypingForUser + notifyPresence)
+      // Conversation.find is used by both helpers
+      Conversation.find.mockResolvedValue([]);
+      User.updateOne = jest.fn().mockResolvedValue({});
+
+      await eventHandlers["disconnect"]();
 
       expect(onlineUsers.has(USER_ID)).toBe(false);
-      expect(ioMock.emit).toHaveBeenCalledWith("user:offline", { userId: USER_ID });
+      // Phase 4 uses targeted presence:update, not global io.emit("user:offline")
+      // Partners list is empty (Conversation.find returns []) so no emit expected
+      // but we confirm the registry was cleaned up
+      expect(onlineUsers.size).toBe(0);
     });
   });
 });

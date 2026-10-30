@@ -10,6 +10,18 @@ const sendMessageSchema = z.object({
     .min(1, "Message cannot be empty")
     .max(2000, "Message is too long"),
   clientMessageId: z.string().optional(),
+  replyTo: z.string().nullable().optional(),
 });
 
-module.exports = { sendMessageSchema };
+const reactionSchema = z.object({
+  emoji: z
+    .string({
+      required_error: "Emoji is required",
+      invalid_type_error: "Emoji is required",
+    })
+    .trim()
+    .min(1, "Emoji cannot be empty")
+    .max(16, "Emoji is too long"),
+});
+
+module.exports = { sendMessageSchema, reactionSchema };
